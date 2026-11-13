@@ -1,0 +1,80 @@
+// 介護・高齢者ダッシュボード DAXメジャー集
+// 前提モデル: powerbi/model.md（FactPref / FactInsurer / FactRecipientsPref / FactTrend）
+// 注意: 「認定率(公式)」と「認定者比率(参考)」は定義が異なるため別メジャーで分離する
+
+// ---- KPI（全国・都道府県） ----
+第1号被保険者数 =
+SUM ( FactPref[第1号被保険者数] )
+
+認定者数 =
+SUM ( FactPref[認定者数_合計] )
+
+認定率_公式_pct =
+// 概要第3表の公表値（第1号ベース）。加重平均ではなく公表列の平均は使わないこと。
+// 単一都道府県選択時はその公表値、全国時は 19.7（公表値）を返す設計とする
+IF (
+    HASONEVALUE ( DimPref[都道府県] ),
+    MAX ( FactPref[認定率_pct_公式_第1号ベース] ),
+    19.7
+)
+
+認定者比率_参考_pct =
+// 認定者総数 ÷ 第1号被保険者数（分子に第2号認定者を含む参考値。公式認定率とは別物）
+DIVIDE ( [認定者数], [第1号被保険者数] ) * 100
+
+給付費_億円 =
+SUM ( FactPref[給付費_億円] )
+
+被保険者1人あたり給付費_円 =
+DIVIDE ( [給付費_億円] * 100000000, [第1号被保険者数] )
+
+高齢化率_pct =
+DIVIDE ( SUM ( FactPref[65歳以上人口_千人_人口推計] ), SUM ( FactPref[総人口_千人_人口推計] ) ) * 100
+
+// ---- 介護度構成 ----
+認定者に占める要介護3以上_pct =
+DIVIDE (
+    SUM ( FactPref[認定者_要介護3] ) + SUM ( FactPref[認定者_要介護4] ) + SUM ( FactPref[認定者_要介護5] ),
+    [認定者数]
+) * 100
+
+認定者に占める要支援_pct =
+DIVIDE (
+    SUM ( FactPref[認定者_要支援1] ) + SUM ( FactPref[認定者_要支援2] ),
+    [認定者数]
+) * 100
+
+// ---- 受給者（月平均換算） ----
+居宅受給者_月平均 =
+DIVIDE ( SUM ( FactRecipientsPref[居宅サービス受給者数_当年度累計_延人月] ), 12 )
+
+地域密着受給者_月平均 =
+DIVIDE ( SUM ( FactRecipientsPref[地域密着型サービス受給者数_当年度累計_延人月] ), 12 )
+
+施設受給者_月平均 =
+DIVIDE ( SUM ( FactRecipientsPref[施設サービス受給者数_当年度累計_延人月] ), 12 )
+
+認定者に占める施設利用_pct =
+// 分子は延べ人月の月平均、参考指標としてのみ使う
+DIVIDE ( [施設受給者_月平均], [認定者数] ) * 100
+
+// ---- 保険者 ----
+保険者_認定者比率_参考_pct =
+DIVIDE ( SUM ( FactInsurer[認定者数_合計] ), SUM ( FactInsurer[第1号被保険者数] ) ) * 100
+
+保険者_1人あたり給付費_円 =
+DIVIDE ( SUM ( FactInsurer[給付費_億円] ) * 100000000, SUM ( FactInsurer[第1号被保険者数] ) )
+
+// ---- 推移 ----
+認定者数_前年度差 =
+VAR cur = SUM ( FactTrend[認定者数_人_全国計] )
+VAR prev =
+    CALCULATE (
+        SUM ( FactTrend[認定者数_人_全国計] ),
+        FILTER ( ALL ( FactTrend ), FactTrend[年度] = MAX ( FactTrend[年度] ) - 1 )
+    )
+RETURN
+    IF ( NOT ISBLANK ( cur ) && NOT ISBLANK ( prev ), cur - prev )
+
+給付費_億円_推移 =
+DIVIDE ( SUM ( FactTrend[給付費_介護給付予防給付_千円_全国計] ), 100000 )
